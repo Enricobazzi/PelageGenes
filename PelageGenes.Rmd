@@ -1,0 +1,381 @@
+---
+title: "PelageGenes"
+author: "Enrico"
+date: "28 May 2018"
+output: html_document
+---
+
+# 0. Path Definition
+
+Define the paths to different locations for easier calling during script
+
+```{r Define paths, eval=FALSE, engine='bash'}
+
+ssh -X ebazzicalupo@genomics-b.ebd.csic.es # these analyses will be conducted in server B because the annotated VCF file is located there
+
+Proj_PATH=/home/ebazzicalupo/PelageGenes # path to the project directory
+Data_PATH=/home/ebazzicalupo/Data # path to data directory
+LPRef_PATH=/home/GRUPOS/grupolince/reference_genomes/lynx_pardinus_genome/lp23_plus_mt.fa # path to lynx pardinus reference genome file
+VCF_PATH=/home/GRUPOS/grupolince/lynx_genomes_5x/VCFs_Dani/c_ll_lp_plus_h_ll_aafilled_SNPs_standard_filter.ann.vcf # path to annotated VCF file
+BDB_Path=/home/ebazzicalupo/Data/BLASTdatabase # path to BLAST database
+DiscBDB_PATH=/home/ebazzicalupo/Data/Discarded_BLASTdatabase # path to Discarded Scaffold BLAST database
+
+```
+
+
+# 1. Search for Genes in Lynx pardinus Genome Annotations
+
+Look for the genes names/abbreviations in the genome annotations files. First look in the Lynx pardinus genome annotations. If any are not found, look for them in Felis catus genome annotations [step 2], then in Homo sapiens genome annotations [step 3].
+
+```{r Search in Lynx Annotations, eval=FALSE, engine='bash'}
+
+## A file called PelageGeneList.txt has been prepared with the gene names written for a boolean search through the grep command. Each line is a gene. The file has been located in the project directory (/home/ebazzicalupo/PelageGenes).
+
+## Genome annotation files for the three species have also been copied in the Data directory (/home/ebazzicalupo/Data). The Felis catus and Homo sapiens Genome Annotations have been downloaded from the ensembl website (https://www.ensembl.org/info/data/ftp/index.html).
+
+cd $Proj_PATH
+
+mkdir LynxResults # create directory to store the results for Lynx
+
+GENES=$(cat PelageGeneList.txt) # call all elements of PelageGeneList.txt
+
+IFS=$'\n' # define the end of a line as a separator for elements so that each ENTIRE line in PelageGeneList.txt will be a search entry
+
+# for each gene create a file containing results and move it to results directory
+for i in ${GENES[@]}
+  do
+  grep -i -E "${i}" $Data_PATH/LYPA23C.all.fix.gff3 > ${i}
+  mv ${i} LynxResults
+done
+
+
+```
+
+Take the results and find the Parent Gene ID for each. Create a .txt file with the list of all Parent Gene IDs found.
+
+```{r Refine Lynx Results, eval=FALSE, engine='bash'}
+
+cd $Proj_PATH/LynxResults
+
+mkdir ParentIDs # create a directory for storing the Parent Gene ID file
+
+LYNXREFINE=$(ls *) # list all results
+
+# for each result, cut the parent gene ID, sort it, eliminate duplicates and create a .Parent file with the Parent Gene IDs stored inside
+for i in ${LYNXREFINE[@]}
+  do cut -d ';' -f2 "${i}" | sort -u > "${i}".Parent
+  mv "${i}".Parent ParentIDs
+done
+
+cd $Proj_PATH/LynxResults/ParentIDs
+
+cat * > ParentIDs.txt # put Parent Gene IDs from all the results in a single .txt file
+
+mv ParentIDs.txt $Proj_PATH
+
+```
+
+# 2. Search in Felis cauts Genome Annotations for Genes not found in Lynx pardinus Genome Annotations. Extract corresponding sequence FASTA. Run BLAST to Lynx pardinus Reference Genome.
+
+Repeat the search in Felis catus genome annotations, using as input the empty results from the Lynx search [step 2a]. This will give coordinates to specific regions in the Felis catus genome.
+Use those coordinates to extract the corresponding sequence (.fa) from the Felis catus reference genome [step 2b], and BLAST it to the Lynx pardinus reference genome [step 2c]. Hit results from the BLAST will be analysed individually [step 4], to see if any genes in Lynx pardinus can be added to the Parent Gene ID list for further analyses [steps 5].
+
+## 2a - Search in Cat annotations
+
+```{r Search in Cat Annotations, eval=FALSE, engine='bash'}
+
+cd $Proj_PATH
+
+mkdir CatResults # create directory to store the results for Felis catus
+
+CATGENES=$(wc -l LynxResults/* | grep ' 0 ' | cut -d '0' -f2 | sed 's/ //' | sed 's/LynxResults\///') # List empty results from Lynx search
+
+IFS=$'\n' # define the end of a line as a separator for elements so that each ENTIRE line in PelageGeneList.txt will be a search entry
+
+# for each gene create a file containing results and move it to results directory
+for i in $CATGENES; do grep -i -E "${i}" $Data_PATH/Felis_catus.Felis_catus_8.0.92.gff3 > cat_"${i}".gff3; mv cat_"${i}".gff3 CatResults; done
+
+```
+
+## 2b - Generate Cat gene FASTA files for BLAST
+
+```{r Generate Cat gene fasta files for BLAST, eval=FALSE, engine='bash'}
+
+## Reference Genome FASTA files for Felis catus and Homo sapiens have been downloaded from the ensembl website (https://www.ensembl.org/info/data/ftp/index.html) and copied in the Data directory (/home/ebazzicalupo/Data).
+
+cd $Proj_PATH/CatResults
+
+CATREFINE=$(ls cat_*.gff3) # list results from grep search
+
+# for each result from the grep search, create a gene.gff3 file with the non-gene (e.g. mRNA, CDS) strings removed
+for i in ${CATREFINE[@]}
+  do
+  awk -v "key=gene" '$3 == key {print($0)}' ${i} > ${i/.gff3}.gene.gff3
+done
+
+
+CATcoords=$(ls cat_*.gene.gff3) # list gene.gff3 files
+
+# generate FASTA file for each gene.gff3 coordinates file
+for i in ${CATcoords[@]}
+  do
+  bedtools getfasta -fo "${i/.gene.gff3}".fa -fi $Data_PATH/Felis_catus.Felis_catus_8.0.dna_sm.toplevel.fa -bed ${i}
+done
+
+```
+
+## 2c - BLAST cat genes to Lynx genome
+
+```{r  BLAST cat genes to Lynx genome, eval=FALSE, engine='bash'}
+
+## First create a BLASTdatabase for the Lynx pardinus FASTA file
+
+cd $Data_PATH
+
+mkdir BLASTdatabase # create a directory for the BLAST database
+
+BDB_Path=/home/ebazzicalupo/Data/BLASTdatabase # define path to BLAST database
+
+scp $LPRef_PATH $BDB_Path # copy reference genome to the BLASTdatabase directory
+
+# create a BLAST database in the BLASTdatabase directory
+makeblastdb -in $BDB/lp23_plus_mt.fa -parse_seqids -dbtype nucl
+
+## BLAST each Cat Gene FASTA to the Lynx pardinus Reference Genome and BLAST database. Look at BLAST manual for output options.
+
+cd $Proj_PATH/CatResults
+
+IFS=$'\n'
+
+CBLASTGENES=$(ls cat_*.fa) # list Cat Gene FASTA files
+
+for GENE in ${CBLASTGENES[@]}
+  do
+  echo "$GENE starting BLAST"
+  blastn -query $Proj_PATH/CatResults/${GENE} -db $BDB_Path/lp23_plus_mt.fa -outfmt "6 qseqid sseqid sstart send length qcovhsp evalue" -out ${GENE/.fa/}.BLASTresults
+  echo "$GENE BLAST finished"
+done
+
+## Move the BLASTresults to a new directory
+
+mkdir BLASTresults
+
+mv *.BLASTresults BLASTresults
+
+```
+
+## 2d - BLAST cat genes to Lynx discarded scaffolds
+
+```{r  BLAST cat genes to Lynx discarded scaffolds, eval=FALSE, engine='bash'}
+
+## Create BLAST database for discarded scaffold
+
+cd $Data_PATH
+
+mkdir Discarded_BLASTdatabase # create a directory for the Discarded Scaffold BLAST database
+
+DiscBDB_PATH=/home/ebazzicalupo/Data/Discarded_BLASTdatabase # define path to Discarded Scaffold BLAST database
+
+scp home/GRUPOS/grupolince/reference_genomes/lynx_pardinus_genome/lp23.discarded.scaffolds.fa $DiscBDB_PATH # copy Discarded Scaffold to the Discarded_BLASTdatabase directory
+
+# create a BLAST database in the Discarded_BLASTdatabase directory
+makeblastdb -in $DiscBDB_PATH/lp23.discarded.scaffolds.fa -parse_seqids -dbtype nucl
+
+
+## BLAST each Cat Gene FASTA to the Lynx pardinus Discarded Scaffold BLAST database. Look at BLAST manual for output options.
+
+cd $Proj_PATH/CatResults
+
+CDSBLASTGENES=$(ls cat_*.fa) 
+
+IFS=$'\n'
+
+for GENE in ${CDSBLASTGENES[@]}
+  do
+  echo "$GENE starting BLAST"
+  blastn -query $Proj_PATH/CatResults/${GENE} -db $DiscBDB_PATH/lp23.discarded.scaffolds.fa -outfmt "6 qseqid sseqid sstart send length qcovhsp evalue" -out ${GENE/.fa/}.DiscBLASTresults
+  echo "$GENE BLAST finished"
+  
+done
+
+## Move BLASTresults to new directory
+
+mkdir DiscBLASTresults
+
+mv *.DiscBLASTresults DiscBLASTresults
+
+```
+
+# 3. Search in Homo sapiens Genome Annotations for Genes not found in Lynx pardinus and Felis catus Genome Annotations. Extract corresponding sequence FASTA. Run BLAST to Lynx pardinus Reference Genome.
+
+Repeat the search in Homo Sapiens genome annotations, using as input the empty results from the Felis catus search [step 3a]. This will give coordinates to specific regions in the Homo sapiens.
+Use those coordinates to extract the corresponding sequence (.fa) from the Homo sapiens reference genome [step 3b], and BLAST it to the Lynx pardinus reference genome [step 3c]. Hit results from the BLAST will be analysed individually, to see if any genes in Lynx pardinus can be added to the Parent Gene ID list for further analyses [steps XX].
+
+## 3a - Search in Human annotations
+
+```{r Search in Human Annotations, eval=FALSE, engine='bash'}
+
+cd $Proj_PATH
+
+mkdir HumanResults # create directory to store the results for Homo sapiens
+
+HUMANGENES=$(wc -l CatResults/*.gene.gff3 | grep ' 0 ' | cut -d '0' -f2 | sed 's/CatResults\/cat_//g' | sed 's/ //') # List empty results from Cat search
+
+# for each gene create a gff3 file containing results and move it to HumanResults folder
+for i in ${HUMANGENES[@]}
+  do
+  grep -i "${i/.gene.gff3/}" $Data_PATH/Homo_sapiens.GRCh38.92.gff3 > human_${i/.gene.gff3/}.gff3
+  mv human_${i/.gene.gff3/}.gff3 HumanResults
+done
+
+```
+
+## 3b - Generate Human gene FASTA files for BLAST
+
+```{r Generate Human gene fasta files for BLAST, eval=FALSE, engine='bash'}
+
+## Reference Genome FASTA files for Felis catus and Homo sapiens have been downloaded from the ensembl website (https://www.ensembl.org/info/data/ftp/index.html) and copied in the Data directory (/home/ebazzicalupo/Data).
+
+cd $Proj_PATH/HumanResults
+
+HUMANREFINE=$(ls human_*.gff3) # list results from grep search
+
+# for each result from the grep search, create a gene.gff3 file with the non-gene (e.g. mRNA, CDS) strings removed
+for i in ${HUMANREFINE[@]}
+  do
+  awk -v "key=gene" '$3 == key {print($0)}' ${i} > ${i/.gff3}.gene.gff3
+done
+
+HUMANcoords=$(ls human_*.gene.gff3) # list gene.gff3 files
+
+# generate FASTA file for each gene.gff3 coordinates file
+for i in ${HUMANcoords[@]}
+  do
+  bedtools getfasta -fo "${i/.gene.gff3}".fa -fi $Data_PATH/Homo_sapiens.GRCh38.dna_sm.toplevel.fa -bed ${i}
+done
+
+```
+
+## 3c - BLAST human genes to Lynx genome
+
+```{r  BLAST human genes to Lynx genome, eval=FALSE, engine='bash'}
+
+## BLAST each Human Gene FASTA to the Lynx pardinus Reference Genome and BLAST database. Look at BLAST manual for output options.
+
+cd $Proj_PATH/HumanResults
+
+IFS=$'\n'
+
+HBLASTGENES=$(ls human_*.fa) # list Human Gene FASTA files
+
+for GENE in ${HBLASTGENES[@]}
+  do
+  echo "$GENE starting BLAST"
+  blastn -query $Proj_PATH/HumanResults/${GENE} -db $BDB_Path/lp23_plus_mt.fa -outfmt "6 qseqid sseqid sstart send length qcovhsp evalue" -out ${GENE/.fa/}.BLASTresults
+  echo "$GENE BLAST finished"
+done
+
+## Move the BLASTresults to a new directory
+
+mkdir BLASTresults
+
+mv *.BLASTresults BLASTresults
+
+```
+
+## 3d - BLAST human genes to Lynx discarded scaffolds
+
+```{r  BLAST human genes to Lynx discarded scaffolds, eval=FALSE, engine='bash'}
+
+## BLAST each Cat Gene FASTA to the Lynx pardinus Discarded Scaffold BLAST database. Look at BLAST manual for output options.
+
+cd $Proj_PATH/HumanResults
+
+HDSBLASTGENES=$(ls human_*.fa) 
+
+IFS=$'\n'
+
+for GENE in ${HDSBLASTGENES[@]}
+  do
+  echo "$GENE starting BLAST"
+  blastn -query $Proj_PATH/HumanResults/${GENE} -db $DiscBDB_PATH/lp23.discarded.scaffolds.fa -outfmt "6 qseqid sseqid sstart send length qcovhsp evalue" -out ${GENE/.fa/}.DiscBLASTresults
+  echo "$GENE BLAST finished"
+  
+done
+
+## Move BLASTresults to new directory
+
+mkdir DiscBLASTresults
+
+mv *.DiscBLASTresults DiscBLASTresults
+
+```
+
+# 4. Copy BLASTresults files from server to the laptop for consultation. Additional genes discovered during this step should be integrated to the ParentIDs.txt file before step 5
+
+```{r  copy BLASTresults files from server to laptop, eval=FALSE, engine='bash'}
+
+# cat greps
+scp ebazzicalupo@genomics-b.ebd.csic.es:/home/ebazzicalupo/PelageGenes/CatResults/*.gff3 ~/home/ebazzicalupo/GrepResults
+
+# cat coordinates
+scp ebazzicalupo@genomics-b.ebd.csic.es:/home/ebazzicalupo/PelageGenes/CatResults/BLASTresults/cat_*.BLASTresults ~/home/ebazzicalupo/Results
+
+# cat discaffold coordinates
+scp ebazzicalupo@genomics-b.ebd.csic.es:/home/ebazzicalupo/PelageGenes/CatResults/DiscBLASTresults/* ~/home/ebazzicalupo/Results
+
+# human greps
+scp ebazzicalupo@genomics-b.ebd.csic.es:/home/ebazzicalupo/PelageGenes/HumanResults/*.gff3 ~/home/ebazzicalupo/GrepResults
+
+# human coordinates
+scp ebazzicalupo@genomics-b.ebd.csic.es:/home/ebazzicalupo/PelageGenes/Data/HumanResults/BLASTresults/human_*.BLASTresults ~/home/ebazzicalupo/Results
+
+# human discaffold coordinates
+scp ebazzicalupo@genomics-b.ebd.csic.es:/home/ebazzicalupo/PelageGenes/HumanResults/DiscBLASTresults/* ~/home/ebazzicalupo/Results
+
+```
+
+# 5. Intersect the VCF data with the Gene coordinates from the previous search to create a VCF with the subset of SNPs that are found within the Gene coordinates regions
+
+Using the ParentIDs.txt file, generate a BED file containing the coordinates of all the genes [step 5a]. Perform some editing in order to make the BED file compatible with the VCF file that will be used. A VCF to which detailed annotations have been previously added will be used. Intersect the VCF file with the BED to obtain a VCF format of the list of all SNPs falling in the regions specified by the BED, with detailed information regarding the region [step 5b].
+
+## 5a - Create BED from ParentIDs and edit it to be compatible with the VCF
+
+```{r  Create BED from ParentIDs and edit for compatibility, eval=FALSE, engine='bash'}
+
+cd $Proj_PATH
+
+# create GFF3 file by looking for ParentIDs in Lynx Genome Annotations
+grep -f ParentIDs.txt $Data_PATH/LYPA23C.all.fix.gff3 > Candidate.gff3
+
+# create BED file from the GFF3 with the following tab separated columns: scaffold, start, end, type, info
+cut -f1,3,4,5,9 Candidate.gff3 | awk 'BEGIN {FS="\t"; OFS="\t"} {print $1, $3, $4, $2, $5}' > Candidate.bed
+
+# modify BED to allow VCF compatibility (scaffold name matching) - sort and insert a . at 4th character in each line
+sort -k1,2 Candidate.bed | awk -vFS="" -vOFS="" '{$4=$4"."}1' > Candidate.compatible.bed
+
+```
+
+## 5b - Intersect compatible BED with the annotated VCF and remove repetitions generated by the overlapping regions in the BED file
+
+```{r  Intersect BED with the VCF and remove repetitions, eval=FALSE, engine='bash'}
+
+## Intersect BED with the VCF
+
+cd $Proj_PATH
+
+mkdir VCF # create directory for VCF results
+
+# intersect the VCF file with the compatible BED
+bedtools intersect -header -a $VCF_PATH -b Candidate.compatible.bed > $Proj_PATH/VCF/lp_bedIntersect.vcf
+
+## Remove duplicates from the Intersect file
+
+cd $Proj_PATH/VCF
+
+grep "#" lp_bedIntersect.vcf > lp_bedIntersect_unique.vcf # copy header part
+
+grep -v "#" lp_bedIntersect.vcf | sort -u -k1,2 >> lp_bedIntersect_unique.vcf # copy table, remove duplicates, add it to header
+
+```
+
