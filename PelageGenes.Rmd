@@ -17,6 +17,7 @@ Proj_PATH=/home/ebazzicalupo/PelageGenes # path to the project directory
 Data_PATH=/home/ebazzicalupo/Data # path to data directory
 LPRef_PATH=/home/GRUPOS/grupolince/reference_genomes/lynx_pardinus_genome/lp23_plus_mt.fa # path to lynx pardinus reference genome file
 VCF_PATH=/home/GRUPOS/grupolince/lynx_genomes_5x/VCFs_Dani/c_ll_lp_plus_h_ll_aafilled_SNPs_standard_filter.ann.vcf # path to annotated VCF file
+gVCF_PATH=/home/GRUPOS/grupolince/lynx_genomes_5x/gVCFs # path to gVCFs
 BDB_Path=/home/ebazzicalupo/Data/BLASTdatabase # path to BLAST database
 DiscBDB_PATH=/home/ebazzicalupo/Data/Discarded_BLASTdatabase # path to Discarded Scaffold BLAST database
 
@@ -337,7 +338,7 @@ scp ebazzicalupo@genomics-b.ebd.csic.es:/home/ebazzicalupo/PelageGenes/HumanResu
 
 # 5. Intersect the VCF data with the Gene coordinates from the previous search to create a VCF with the subset of SNPs that are found within the Gene coordinates regions
 
-Using the ParentIDs.txt file, generate a BED file containing the coordinates of all the genes [step 5a]. Perform some editing in order to make the BED file compatible with the VCF file that will be used. A VCF to which detailed annotations have been previously added will be used. Intersect the VCF file with the BED to obtain a VCF format of the list of all SNPs falling in the regions specified by the BED, with detailed information regarding the region [step 5b].
+Using the ParentIDs.txt file, generate a BED file containing the coordinates of all the genes [step 5a]. Perform some editing in order to make the BED file compatible with the VCF file that will be used. A VCF to which detailed annotations have been previously added will be used. Intersect the VCF file with the BED to obtain a VCF format of the list of all SNPs falling in the regions specified by the BED, with detailed information regarding the region [step 5b]. The input VCF with detailed annotations was comprised of both Lynx pardinus and Lynx lynx individuals. Additional post-processing of the final VCF has been done in order to divide the two species, and then, for each species, remove the sites which had no variability left after the split [step 5c].
 
 ## 5a - Create BED from ParentIDs and edit it to be compatible with the VCF
 
@@ -379,3 +380,69 @@ grep -v "#" lp_bedIntersect.vcf | sort -u -k1,2 >> lp_bedIntersect_unique.vcf # 
 
 ```
 
+## 5c - Divide VCF by species and remove no longer variable Sites
+
+```{r  Divide VCF and remove no longer variable Sites, eval=FALSE, engine='bash'}
+
+cd $gVCF_PATH # go to the gVCF files
+
+declare SPECIES=$(ls {*lp,*ll}_*.g.vcf.gz | cut -c3-4 | sort | uniq) # list the abbreviations of the species we need to cut from our VCF
+
+# for each species, add all individuals to a list of individuals to remove (list_to_remove.txt), create a VCF (-Ov) file selecting the individuals to remove from the list (-S), remove all non variable sites (min-ac 1:minor)
+for i in ${SPECIES[@]}
+  do
+  echo "${i}"
+  ls *${i}*g.vcf.gz | cut -c1-12 > list_to_remove.txt
+  bcftools view -S list_to_remove.txt --min-ac 1:minor -Ov -o $Proj_PATH/VCF/"${i}"_species.vcf $Proj_PATH/VCF/lp_bedIntersect_unique.vcf
+  done
+rm list_to_remove.txt
+
+```
+
+# 6. Extract useful SNPs information and annotations from VCF file
+
+```{r   Extract useful SNPs information and annotations from VCF file, eval=FALSE, engine='bash'}
+
+## Tried by separating into different tables. NOT USEFUL and too complex.
+grep -v '##' lp_species.vcf > lp_species_table.vcf
+
+grep -v '#' lp_species_table.vcf | cut -f1,2,4,5,8 | cut -d ';' -f1,2,3,4,18 | tr ';' '\t' | sed 's/||/|@|/g' | sed 's/||/|@|/g' | cut -d ',' -f1 | tr '|' '\t' > SNPeffOnly.vcf
+
+grep -v '#' lp_species_table.vcf | cut -f1,2,4,5,8 | cut -d ';' -f1,2,3,4,18 | tr ';' '\t' | sed 's/||/|@|/g' | sed 's/||/|@|/g' | cut -d ',' -f2 | sed 's/|@|/|/' | tr '|' '\t' | awk -v OFS='\t' '{print $1, $2, $3, $4, $5, $6, $7, $8, "@", $9, $10, $11, $12, $13, $14}' > custom1.vcf
+
+grep -v '#' lp_species_table.vcf | cut -f1,2,4,5,8 | cut -d ';' -f1,2,3,4,18 | tr ';' '\t' | sed 's/||/|@|/g' | sed 's/||/|@|/g' | cut -d ',' -f3 | sed 's/|@|/|/' | tr '|' '\t' | awk -v OFS='\t' '{print $1, $2, $3, $4, $5, $6, $7, $8, "@", $9, $10, $11, $12, $13, $14}'> custom2.vcf
+
+grep -v '#' lp_species_table.vcf | cut -f1,2,4,5,8 | cut -d ';' -f1,2,3,4,18 | tr ';' '\t' | sed 's/||/|@|/g' | sed 's/||/|@|/g' | cut -d ',' -f4 | sed 's/|@|/|/' | tr '|' '\t' | awk -v OFS='\t' '{print $1, $2, $3, $4, $5, $6, $7, $8, "@", $9, $10, $11, $12, $13, $14}'> custom3.vcf
+
+
+## Try with awk fill 
+
+grep -v '#' lp_species.vcf | cut -f1-8 > lp_species_noIndividuals.vcf
+
+sed 's/||/|na|/g' lp_species_noIndividuals.vcf | sed 's/||/|na|/g' > lp_species_noIndividuals_nas.vcf
+
+max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' lp_species_noIndividuals_nas.vcf)
+
+awk -v max=$max -v FS=',' -v OFS=',' '{ for(i=NF+1; i<=max; i++) $i = "na|na|na|na|na|na|na|na|na|na|na|na|na|na|na|"; print }' lp_species_noIndividuals_nas.vcf > lp_species_noIndividuals_nas_quad.vcf
+
+tr ';' '\t' <lp_species_noIndividuals_nas_quad.vcf | tr ',' '\t' > lp_species_noIndividuals_nas_quad_tabs.vcf
+
+# remove the INFO= before of the variable
+
+grep 'INFO=' lp_species.vcf | cut -d '=' -f3 | cut -d ',' -f1 | head -22 > info.txt
+
+while read pattern
+do
+sed 's/'$pattern'=//' lp_species_noIndividuals_nas_quad_tabs.vcf > tmp
+mv tmp lp_species_noIndividuals_nas_quad_tabs.vcf
+done < info.txt
+
+sed 's/=//g' lp_species_noIndividuals_nas_quad_tabs.vcf > tmp && mv tmp lp_species_noIndividuals_nas_quad_tabs.vcf
+
+# header will need to be added by hand (not all INFO is present in file and adding it all to the headers will mean having mismatching variable-value couples). The ones present in the file are CHROM	POS	ID	REF	ALT	QUAL	FILTER  AA  AC  AF  AN  BaseQRankSum  ClippingRankSum DP  ExcessHet FS  InbreedingCoeff  MLEAC MLEAF MQ  MQRankSum QD  ReadPosRankSum  SOR ANN ANN2  ANN3  ANN4
+
+nano lp_species_noIndividuals_nas_quad_tabs.vcf # to add them: saved as lp_species_noIndividuals_nas_quad_tabs_header.vcf
+
+
+
+```
