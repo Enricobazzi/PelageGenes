@@ -480,6 +480,8 @@ sort -k1,2 $Proj_PATH/VCF/lp_GATK_ParentIDsGrep.vcf > tmp && mv tmp $Proj_PATH/V
 
 # 6. Extract useful SNPs information and annotations from VCF file
 
+NONE EMPTY difference?
+
 ```{r   Extract useful SNPs information and annotations from VCF file, eval=FALSE, engine='bash'}
 
 ## Tried by separating into different tables. NOT USEFUL and too complex.
@@ -494,7 +496,7 @@ grep -v '#' lp_species_table.vcf | cut -f1,2,4,5,8 | cut -d ';' -f1,2,3,4,18 | t
 grep -v '#' lp_species_table.vcf | cut -f1,2,4,5,8 | cut -d ';' -f1,2,3,4,18 | tr ';' '\t' | sed 's/||/|@|/g' | sed 's/||/|@|/g' | cut -d ',' -f4 | sed 's/|@|/|/' | tr '|' '\t' | awk -v OFS='\t' '{print $1, $2, $3, $4, $5, $6, $7, $8, "@", $9, $10, $11, $12, $13, $14}'> custom3.vcf
 
 
-## Try with awk fill 
+## Try with awk fill - USELESS - see below (next ## step) for better version
 
 # remove header and information about individuals
 grep -v '#' lp_GATK_ParentIDsGrep.vcf | cut -f1-8 > lp_GATK_ParentIDsGrep_noIndividuals.vcf
@@ -503,7 +505,7 @@ grep -v '#' lp_GATK_ParentIDsGrep.vcf | cut -f1-8 > lp_GATK_ParentIDsGrep_noIndi
 sed 's/||/|na|/g' lp_GATK_ParentIDsGrep_noIndividuals.vcf | sed 's/||/|na|/g' > lp_GATK_ParentIDsGrep_noIndividuals_nas.vcf
 
 # move the ANN= column to the end of the file
-awk -F, -v FS=';' -v OFS=';' '{ print $1,$2,$3,$4,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$5}' lp_GATK_ParentIDsGrep_noIndividuals_nas.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf
+awk -v FS=';' -v OFS=';' '{print $1,$2,$3,$4,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$5}' lp_GATK_ParentIDsGrep_noIndividuals_nas.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf
 
 # add "na|na|na|na|na|na|na|na|na|na|na|na|na|na|na|" to missing ANN columns to render the file squared
 max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf)
@@ -527,5 +529,93 @@ touch headers.txt
 nano headers.txt
 
 nano lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_quad_tabs.vcf # to add them: saved as lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_quad_tabs_headers.vcf
+
+
+## FINAL VERSION - fixed number of SNPEFF and Custom annotations for each SNP
+
+# divide the table in two - one with SNPEFF only and other with custom only -> render them quadratic and then unite them
+
+# remove header and information about individuals
+grep -v '#' lp_GATK_ParentIDsGrep.vcf | cut -f1-8 > lp_GATK_ParentIDsGrep_noIndividuals.vcf
+
+# replace blank spaces in ANN= with "na"
+sed 's/||/|na|/g' lp_GATK_ParentIDsGrep_noIndividuals.vcf | sed 's/||/|na|/g' > lp_GATK_ParentIDsGrep_noIndividuals_nas.vcf
+
+# move the ANN= column to the end of the file
+awk -v FS=';' -v OFS=';' '{print $1,$2,$3,$4,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$5}' lp_GATK_ParentIDsGrep_noIndividuals_nas.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf
+
+# remove custom annotations - SNPEFF ONLY are left
+sed 's/,.*|custom|MODIFIER|na|na|CUSTOM&LYPA23C|.*|na|na|na|na|na|//g' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustom.vcf
+
+# add "NONE" to missing ANN columns to render the file squared for NOCUSTOM FILE - SNPEFF ONLY
+max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustom.vcf)
+
+echo $max
+
+awk -v max=$max -v FS=',' -v OFS=',' '{ for(i=NF+1; i<=max; i++) $i = "NONE"; print }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustom.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared.vcf
+
+# isolate custom annotations - CUSTOM ONLY
+
+# get all lines with custom annotations and the corresponding line number
+grep -n -o ",.|custom|MODIFIER|na|na|CUSTOM&LYPA23C|.*|na|na|na|na|na|" lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly.vcf
+
+# generate a file with the corresponding line number for the custom annotations
+cut -d ':' -f1 lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly.vcf > aa_customlines
+
+# generate a file with all the numbers from 1 to the maximum line number - total number of lines in the original file
+TotalNumberOfLines=$(grep "lp" lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf | wc -l)
+
+seq $TotalNumberOfLines > aa_totlines
+
+# subtract the custom line numbers from the total number of lines to generate a file listing the missing lines (lines with no custom annotation)
+comm aa_customlines aa_totlines | cut -f2 | sed '/^\s*$/d' > aa_nocustomlines
+
+# add a white line in the custom annotations grep file in the missing positions
+NoCustomLines=$(cat aa_nocustomlines)
+
+# CAREFUL AS IT OVERWRITES - CHECK IF DONE ALREADY / OTHER POSSIBLE PROBLEMS - if problems are found better re-generate lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly.vcf from scratch
+for i in $NoCustomLines
+  do
+  ed -s lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly.vcf < <(printf '%s\n' ${i}i "" . wq)
+done
+
+# remove useless files used for previous steps
+rm aa_*
+
+#remove comma for paste
+cut -d ':' -f2 lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly.vcf | sed 's/,//' > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines.vcf
+
+# NOT NECESSARY - square before pasting - WILL CONDENSE ALL INFORMATION IN UNIQUE CUSTOM COLUMN (see next step)
+max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines.vcf)
+
+awk -v max=$max -v FS=',' -v OFS=',' '{ for(i=NF+1; i<=max; i++) $i = "na|na|na|na|na|na|na|na|na|na|na|na|na|na|na|"; print }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines_squared.vcf
+
+# condense all information in unique custom column: first count the maximum number of custom annotation columns (max); then cut columns 7, 22, 37, 52, 67 ecc. (always add 15 to the previous starting from 7) a number of times equal to max (to catch all)
+
+max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines.vcf) && echo $max # count columns
+
+cut -d '|' -f7,22,37,52 lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines_condensed.vcf
+
+# insert EMPTY in empty lines
+sed -i -e 's/^$/EMPTY/' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines_condensed.vcf
+
+# paste together the SNPEFF only and the CUSTOM only files
+paste -d ',' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared.vcf lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines_condensed.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared_custom.vcf
+
+# remove other separators -> tabs only
+tr ';' '\t' <lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared_custom.vcf | tr ',' '\t' > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared_custom_tabs.vcf
+
+# remove the "variable"= before of the variable value
+grep 'INFO=' lp_GATK_ParentIDsGrep.vcf | cut -d '=' -f3 | cut -d ',' -f1 > info.txt
+
+while read pattern
+do
+sed 's/'$pattern'=//' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared_custom_tabs.vcf > tmp
+mv tmp lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared_custom_tabs.vcf
+done < info.txt
+
+# header will need to be added by hand (not all INFO is present in file and adding it all to the headers will mean having mismatching variable-value couples). The ones present in the file are CHROM	POS	ID	REF	ALT	QUAL	FILTER	AA	AC	AF	AN	BaseQRankSum	ClippingRankSum	DP	ExcessHet	FS	InbreedingCoeff	MQ	MQRankSum	QD	ReadPosRankSum	SOR	SNPEFF1	SNPEFF2	CUSTOM (number of SNPEFF and CUSTOM columns can be seen by echoing $max while squaring the respective tables)
+touch headers.txt
+nano headers.txt
 
 ```
