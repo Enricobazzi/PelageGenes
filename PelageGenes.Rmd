@@ -289,7 +289,7 @@ mv *.BLASTresults BLASTresults
 
 ```{r  BLAST human genes to Lynx discarded scaffolds, eval=FALSE, engine='bash'}
 
-## BLAST each Cat Gene FASTA to the Lynx pardinus Discarded Scaffold BLAST database. Look at BLAST manual for output options.
+## BLAST each Human Gene FASTA to the Lynx pardinus Discarded Scaffold BLAST database. Look at BLAST manual for output options.
 
 cd $Proj_PATH/HumanResults
 
@@ -337,9 +337,10 @@ scp ebazzicalupo@genomics-b.ebd.csic.es:/home/ebazzicalupo/PelageGenes/HumanResu
 
 ```
 
-# 5. MODIFY TO REFLECT CHANGES - Intersect the VCF data with the Gene coordinates from the previous search to create a VCF with the subset of SNPs that are found within the Gene coordinates regions
+# 5. Generate a VCF with the list of SNPs of our genes of interest. 
 
-MODIFY! - Using the ParentIDs.txt file, generate a BED file containing the coordinates of all the genes [step 5a]. Perform some editing in order to make the BED file compatible with the VCF file that will be used. A VCF to which detailed annotations have been previously added will be used. Intersect the VCF file with the BED to obtain a VCF format of the list of all SNPs falling in the regions specified by the BED, with detailed information regarding the region [step 5b]. The input VCF with detailed annotations was comprised of both Lynx pardinus and Lynx lynx individuals. Additional post-processing of the final VCF has been done in order to divide the two species, and then, for each species, remove the sites which had no variability left after the split [step 5c].
+First we need to divide the bigger VCF including both multiple species into one with only the species of interest (in this case divide Lynx lynx from Lynx pardinus). For this two alternative routs can be taken. One uses BCF tools [step 5a], which is very fast in running, but doesn't recalculate all of the statistics. The other uses GATK [step 5b], which is much slower, changes the order of the statistics in the INFO category (ANNOTATIONS goes in the middle instead of the end), but will recalculate all of the statistics. Both methods are based on a list of individuals to remove (changing the list you can divide by other parameters, like population).
+Next we need to extract from the resulting VCF file the positions that fall within the genes we are interested in. This can also be done in two different ways. One uses BEDtools [step 5c], which uses as input files a BED file with the coordinates of the regions to extract [step 5b] and the VCF file. The limitation of this method is that it will not extract intergenic, upstream or downstream regions which might be of interest. The other method uses grep [step 5d], which will extract also these missing regions.
 
 ## 5a - Divide VCF by species and remove no longer variable Sites - BCFtools
 
@@ -351,7 +352,7 @@ cd $gVCF_PATH # go to the gVCF files
 
 declare SPECIES=$(ls {*lp,*ll}_*.g.vcf.gz | cut -c3-4 | sort | uniq) # list the abbreviations of the species we need to cut from our VCF
 
-# for each species, add all individuals to a list of individuals to remove (list_to_remove.txt), create a VCF (-Ov) file selecting the individuals to remove from the list (-S), remove all non variable sites (min-ac 1:minor)
+# For each species, add all individuals to a list of individuals to remove (list_to_remove.txt), create a VCF (-Ov) file selecting the individuals to remove from the list (-S), remove all non variable sites (min-ac 1:minor)
 for i in ${SPECIES[@]}
   do
   echo "${i}"
@@ -379,7 +380,7 @@ java -jar /home/tmp/Software/Picard/picard-tools-1.66/CreateSequenceDictionary.j
 # Create FASTA index (.fa.fai) file for the reference genome for GATK to work
 samtools faidx $Data_PATH/lp23_plus_mt.fa
 
-# Divide by species creating a screen for long GATK process
+# Divide by species, create a screen for long GATK process
 
 cd $Proj_PATH
 
@@ -389,7 +390,7 @@ Proj_PATH=/home/ebazzicalupo/PelageGenes # redefine path to the project director
 
 script $Proj_PATH/GATK_devidebyspecies.log # save script log
 
-# redefine variables for script
+# Redefine variables for script
 Proj_PATH=/home/ebazzicalupo/PelageGenes # path to the project directory
 Data_PATH=/home/ebazzicalupo/Data # path to data directory
 LPRef_PATH=/home/GRUPOS/grupolince/reference_genomes/lynx_pardinus_genome/lp23_plus_mt.fa # path to lynx pardinus reference genome file
@@ -425,13 +426,13 @@ rm list_to_remove.txt
 
 cd $Proj_PATH
 
-# create GFF3 file by looking for ParentIDs in Lynx Genome Annotations
+# Create GFF3 file by looking for ParentIDs in Lynx Genome Annotations
 grep -f ParentIDs.txt $Data_PATH/LYPA23C.all.fix.gff3 > Candidate.gff3
 
-# create BED file from the GFF3 with the following tab separated columns: scaffold, start, end, type, info
+# Create BED file from the GFF3 with the following tab separated columns: scaffold, start, end, type, info
 cut -f1,3,4,5,9 Candidate.gff3 | awk 'BEGIN {FS="\t"; OFS="\t"} {print $1, $3, $4, $2, $5}' > Candidate.bed
 
-# modify BED to allow VCF compatibility (scaffold name matching) - sort and insert a . at 4th character in each line
+# Modify BED to allow VCF compatibility (scaffold name matching) - sort and insert a . at 4th character in each line
 sort -k1,2 Candidate.bed | awk -vFS="" -vOFS="" '{$4=$4"."}1' > Candidate.compatible.bed
 
 ```
@@ -444,9 +445,9 @@ sort -k1,2 Candidate.bed | awk -vFS="" -vOFS="" '{$4=$4"."}1' > Candidate.compat
 
 cd $Proj_PATH
 
-mkdir VCF # create directory for VCF results
+mkdir VCF # Create directory for VCF results
 
-# intersect the VCF file with the compatible BED
+# Intersect the VCF file with the compatible BED
 bedtools intersect -header -a $VCF_PATH -b Candidate.compatible.bed > $Proj_PATH/VCF/lp_bedIntersect.vcf
 
 ## Remove duplicates from the Intersect file
@@ -465,104 +466,58 @@ grep -v "#" lp_bedIntersect.vcf | sort -u -k1,2 >> lp_bedIntersect_unique.vcf # 
 
 cd $Proj_PATH
 
+# The ParentIDs list contains "Parent=" before each ID, interfering with the search. 
 sed 's/Parent=//g' ParentIDs.txt > ParentIDs_onlyIDs.txt
 
-# add the '#' sign to the list in order to copy the header part of the VCF too
+# Add the '#' sign to the list in order to copy the header part of the VCF too
 nano ParentIDs_onlyIDs.txt
 
-# grep all elements in the ParentIDs list from the VCF
+# Grep all elements in the ParentIDs list from the VCF
 grep -f $Proj_PATH/ParentIDs_onlyIDs.txt $Proj_PATH/VCF/lp_GATK_species.vcf > $Proj_PATH/VCF/lp_GATK_ParentIDsGrep.vcf
 
-# sort SNPs
+# Sort SNPs
 sort -k1,2 $Proj_PATH/VCF/lp_GATK_ParentIDsGrep.vcf > tmp && mv tmp $Proj_PATH/VCF/lp_GATK_ParentIDsGrep.vcf
 
 ```
 
-# 6. Extract useful SNPs information and annotations from VCF file
+# 6. Create a table with the useful SNPs information and annotations from VCF file
 
-NONE EMPTY difference?
+A table is created with the information regarding the SNPs. Different approaches have been tried. The final version [step 6b] has the advantage of having a fixed number of columns for the SNPEFF annotations (the maximum present in the file, with the ones missing filled with NONE), and a unique column for all of the CUSTOM annotations containing the information regarding the "feature" (region where the SNP falls). SNPs with no CUSTOM annotation will have "EMPTY" in that column.
 
-```{r   Extract useful SNPs information and annotations from VCF file, eval=FALSE, engine='bash'}
+## 6 - Create a table with the useful SNPs information and annotations
 
-## Tried by separating into different tables. NOT USEFUL and too complex.
-grep -v '##' lp_species.vcf > lp_species_table.vcf
+```{r Create a table with the useful SNPs information and annotations, eval=FALSE, engine='bash'}
 
-grep -v '#' lp_species_table.vcf | cut -f1,2,4,5,8 | cut -d ';' -f1,2,3,4,18 | tr ';' '\t' | sed 's/||/|@|/g' | sed 's/||/|@|/g' | cut -d ',' -f1 | tr '|' '\t' > SNPeffOnly.vcf
-
-grep -v '#' lp_species_table.vcf | cut -f1,2,4,5,8 | cut -d ';' -f1,2,3,4,18 | tr ';' '\t' | sed 's/||/|@|/g' | sed 's/||/|@|/g' | cut -d ',' -f2 | sed 's/|@|/|/' | tr '|' '\t' | awk -v OFS='\t' '{print $1, $2, $3, $4, $5, $6, $7, $8, "@", $9, $10, $11, $12, $13, $14}' > custom1.vcf
-
-grep -v '#' lp_species_table.vcf | cut -f1,2,4,5,8 | cut -d ';' -f1,2,3,4,18 | tr ';' '\t' | sed 's/||/|@|/g' | sed 's/||/|@|/g' | cut -d ',' -f3 | sed 's/|@|/|/' | tr '|' '\t' | awk -v OFS='\t' '{print $1, $2, $3, $4, $5, $6, $7, $8, "@", $9, $10, $11, $12, $13, $14}'> custom2.vcf
-
-grep -v '#' lp_species_table.vcf | cut -f1,2,4,5,8 | cut -d ';' -f1,2,3,4,18 | tr ';' '\t' | sed 's/||/|@|/g' | sed 's/||/|@|/g' | cut -d ',' -f4 | sed 's/|@|/|/' | tr '|' '\t' | awk -v OFS='\t' '{print $1, $2, $3, $4, $5, $6, $7, $8, "@", $9, $10, $11, $12, $13, $14}'> custom3.vcf
-
-
-## Try with awk fill - USELESS - see below (next ## step) for better version
+## FINAL VERSION - fixed number of SNPEFF and Custom annotations for each SNP: divide the table in two - one with SNPEFF only and other with custom only, then unite them
 
 # remove header and information about individuals
 grep -v '#' lp_GATK_ParentIDsGrep.vcf | cut -f1-8 > lp_GATK_ParentIDsGrep_noIndividuals.vcf
 
-# replace blank spaces in ANN= with "na"
+# replace blank spaces in annotations with "na"
 sed 's/||/|na|/g' lp_GATK_ParentIDsGrep_noIndividuals.vcf | sed 's/||/|na|/g' > lp_GATK_ParentIDsGrep_noIndividuals_nas.vcf
 
-# move the ANN= column to the end of the file
+# move the ANN= column to the end of the file - ONLY IF THE VCF HAS BEEN SEPARATED USING GATK WHICH REORDERS THE STATISTICS
 awk -v FS=';' -v OFS=';' '{print $1,$2,$3,$4,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$5}' lp_GATK_ParentIDsGrep_noIndividuals_nas.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf
 
-# add "na|na|na|na|na|na|na|na|na|na|na|na|na|na|na|" to missing ANN columns to render the file squared
-max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf)
-
-awk -v max=$max -v FS=',' -v OFS=',' '{ for(i=NF+1; i<=max; i++) $i = "na|na|na|na|na|na|na|na|na|na|na|na|na|na|na|"; print }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_quad.vcf
-
-# change all field separators to TAB
-tr ';' '\t' <lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_quad.vcf | tr ',' '\t' > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_quad_tabs.vcf
-
-# remove the "variable"= before of the variable value
-grep 'INFO=' lp_GATK_ParentIDsGrep.vcf | cut -d '=' -f3 | cut -d ',' -f1 > info.txt
-
-while read pattern
-do
-sed 's/'$pattern'=//' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_quad_tabs.vcf > tmp
-mv tmp lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_quad_tabs.vcf
-done < info.txt
-
-# header will need to be added by hand (not all INFO is present in file and adding it all to the headers will mean having mismatching variable-value couples). The ones present in the file are CHROM	POS	ID	REF	ALT	QUAL	FILTER	AA	AC	AF	AN	BaseQRankSum	ClippingRankSum	DP	ExcessHet	FS	InbreedingCoeff	MQ	MQRankSum	QD	ReadPosRankSum	SOR	ANN1	ANN2	ANN3	ANN4	ANN5	ANN6
-touch headers.txt
-nano headers.txt
-
-nano lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_quad_tabs.vcf # to add them: saved as lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_quad_tabs_headers.vcf
-
-
-## FINAL VERSION - fixed number of SNPEFF and Custom annotations for each SNP
-
-# divide the table in two - one with SNPEFF only and other with custom only -> render them quadratic and then unite them
-
-# remove header and information about individuals
-grep -v '#' lp_GATK_ParentIDsGrep.vcf | cut -f1-8 > lp_GATK_ParentIDsGrep_noIndividuals.vcf
-
-# replace blank spaces in ANN= with "na"
-sed 's/||/|na|/g' lp_GATK_ParentIDsGrep_noIndividuals.vcf | sed 's/||/|na|/g' > lp_GATK_ParentIDsGrep_noIndividuals_nas.vcf
-
-# move the ANN= column to the end of the file
-awk -v FS=';' -v OFS=';' '{print $1,$2,$3,$4,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$5}' lp_GATK_ParentIDsGrep_noIndividuals_nas.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf
-
-# remove custom annotations - SNPEFF ONLY are left
+# remove custom annotations - SNPEFF annotations ONLY are left
 sed 's/,.*|custom|MODIFIER|na|na|CUSTOM&LYPA23C|.*|na|na|na|na|na|//g' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustom.vcf
 
-# add "NONE" to missing ANN columns to render the file squared for NOCUSTOM FILE - SNPEFF ONLY
+# add "NONE" to missing ANN columns to render the file squared for NOCUSTOM FILE
 max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustom.vcf)
 
-echo $max
+echo $max # to know how many columns of SNPEFF annotations there will be
 
 awk -v max=$max -v FS=',' -v OFS=',' '{ for(i=NF+1; i<=max; i++) $i = "NONE"; print }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustom.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared.vcf
 
-# isolate custom annotations - CUSTOM ONLY
+# isolate custom annotations - CUSTOM annotations ONLY are left
 
-# get all lines with custom annotations and the corresponding line number
+# get all lines with custom annotations and the corresponding line number - CUSTOM ONLY
 grep -n -o ",.|custom|MODIFIER|na|na|CUSTOM&LYPA23C|.*|na|na|na|na|na|" lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly.vcf
 
-# generate a file with the corresponding line number for the custom annotations
+# generate a file with the corresponding line number for the custom annotations - CUSTOM ONLY
 cut -d ':' -f1 lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly.vcf > aa_customlines
 
-# generate a file with all the numbers from 1 to the maximum line number - total number of lines in the original file
+# generate a file with all the numbers from 1 to the maximum line number (total number of lines in the original file)
 TotalNumberOfLines=$(grep "lp" lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered.vcf | wc -l)
 
 seq $TotalNumberOfLines > aa_totlines
@@ -570,10 +525,9 @@ seq $TotalNumberOfLines > aa_totlines
 # subtract the custom line numbers from the total number of lines to generate a file listing the missing lines (lines with no custom annotation)
 comm aa_customlines aa_totlines | cut -f2 | sed '/^\s*$/d' > aa_nocustomlines
 
-# add a white line in the custom annotations grep file in the missing positions
+# add a white line in the CUSTOM ONLY annotations file in the missing lines - CAREFUL AS IT OVERWRITES - CHECK IF DONE ALREADY / OTHER POSSIBLE PROBLEMS - if problems are found better re-generate lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly.vcf from scratch
 NoCustomLines=$(cat aa_nocustomlines)
 
-# CAREFUL AS IT OVERWRITES - CHECK IF DONE ALREADY / OTHER POSSIBLE PROBLEMS - if problems are found better re-generate lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly.vcf from scratch
 for i in $NoCustomLines
   do
   ed -s lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly.vcf < <(printf '%s\n' ${i}i "" . wq)
@@ -582,27 +536,22 @@ done
 # remove useless files used for previous steps
 rm aa_*
 
-#remove comma for paste
+# remove comma before pasting the two tables together - CUSTOM ONLY
 cut -d ':' -f2 lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly.vcf | sed 's/,//' > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines.vcf
 
-# NOT NECESSARY - square before pasting - WILL CONDENSE ALL INFORMATION IN UNIQUE CUSTOM COLUMN (see next step)
-max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines.vcf)
+# condense all information in unique custom column: first count the maximum number of custom annotation columns (max); then cut columns 7, 22, 37, 52, 67 ecc. (always add 15 to the previous starting from 7) a number of times equal to max (to catch all) - CUSTOM ONLY
 
-awk -v max=$max -v FS=',' -v OFS=',' '{ for(i=NF+1; i<=max; i++) $i = "na|na|na|na|na|na|na|na|na|na|na|na|na|na|na|"; print }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines_squared.vcf
+max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines.vcf) && echo $max # count number of columns to include
 
-# condense all information in unique custom column: first count the maximum number of custom annotation columns (max); then cut columns 7, 22, 37, 52, 67 ecc. (always add 15 to the previous starting from 7) a number of times equal to max (to catch all)
+cut -d '|' -f7,22,37,52 lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines_condensed.vcf # in this case max=4 so columns 7,22(7+15),37(7+30),52(7+45)
 
-max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines.vcf) && echo $max # count columns
-
-cut -d '|' -f7,22,37,52 lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines_condensed.vcf
-
-# insert EMPTY in empty lines
+# insert EMPTY in empty lines CUSTOM ONLY
 sed -i -e 's/^$/EMPTY/' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines_condensed.vcf
 
-# paste together the SNPEFF only and the CUSTOM only files
+# paste together the SNPEFF ONLY and the CUSTOM ONLY files
 paste -d ',' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared.vcf lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_customonly_blanklines_condensed.vcf > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared_custom.vcf
 
-# remove other separators -> tabs only
+# remove other separators -> leave TAB as only separator
 tr ';' '\t' <lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared_custom.vcf | tr ',' '\t' > lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared_custom_tabs.vcf
 
 # remove the "variable"= before of the variable value
@@ -614,7 +563,9 @@ sed 's/'$pattern'=//' lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsq
 mv tmp lp_GATK_ParentIDsGrep_noIndividuals_nas_ordered_nocustomsquared_custom_tabs.vcf
 done < info.txt
 
-# header will need to be added by hand (not all INFO is present in file and adding it all to the headers will mean having mismatching variable-value couples). The ones present in the file are CHROM	POS	ID	REF	ALT	QUAL	FILTER	AA	AC	AF	AN	BaseQRankSum	ClippingRankSum	DP	ExcessHet	FS	InbreedingCoeff	MQ	MQRankSum	QD	ReadPosRankSum	SOR	SNPEFF1	SNPEFF2	CUSTOM (number of SNPEFF and CUSTOM columns can be seen by echoing $max while squaring the respective tables)
+rm info.txt
+
+# header will need to be added by hand (not all INFO is present in file and adding it all to the headers will mean having mismatching variable-value couples). The ones present in the file are CHROM	POS	ID	REF	ALT	QUAL	FILTER	AA	AC	AF	AN	BaseQRankSum	ClippingRankSum	DP	ExcessHet	FS	InbreedingCoeff	MQ	MQRankSum	QD	ReadPosRankSum	SOR	SNPEFF1	SNPEFF2	CUSTOM (number of SNPEFF columns can be seen by echoing $max while squaring the table)
 touch headers.txt
 nano headers.txt
 
