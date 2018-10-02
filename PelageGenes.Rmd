@@ -342,6 +342,8 @@ scp ebazzicalupo@genomics-b.ebd.csic.es:/home/ebazzicalupo/PelageGenes/HumanResu
 First we need to divide the bigger VCF including both multiple species into one with only the species of interest (in this case divide Lynx lynx from Lynx pardinus). For this two alternative routs can be taken. One uses BCF tools [step 5a], which is very fast in running, but doesn't recalculate all of the statistics. The other uses GATK [step 5b], which is much slower, changes the order of the statistics in the INFO category (ANNOTATIONS goes in the middle instead of the end), but will recalculate all of the statistics. Both methods are based on a list of individuals to remove (changing the list you can divide by other parameters, like population).
 Next we need to extract from the resulting VCF file the positions that fall within the genes we are interested in. This can also be done in two different ways. One uses BEDtools [step 5c], which uses as input files a BED file with the coordinates of the regions to extract [step 5b] and the VCF file. The limitation of this method is that it will not extract intergenic, upstream or downstream regions which might be of interest. The other method uses grep [step 5d], which will extract also these missing regions.
 
+A new version of this step uses a different VCF file. This VCF is the one which includes both Lynx pardinus and Lynx lynx species, to include more information and allow comparisons between the two to be made. The different VCF file has been used directly in step 5d. The rest of the script was kept just in case it might be needed for future work.
+
 ## 5a - Divide VCF by species and remove no longer variable Sites - BCFtools
 
 ```{r  Divide VCF and remove no longer variable Sites, eval=FALSE, engine='bash'}
@@ -462,8 +464,9 @@ grep -v "#" lp_bedIntersect.vcf | sort -u -k1,2 >> lp_bedIntersect_unique.vcf # 
 
 ## 5d - ALTERNATIVE: look for (grep) ParentIDs in VCF file directly
 
-```{r  Divide VCF and remove no longer variable Sites, eval=FALSE, engine='bash'}
+```{r  Grep ParentIDs from VCF, eval=FALSE, engine='bash'}
 
+## Prepare ParentIDs file for grep
 cd $Proj_PATH
 
 # The ParentIDs list contains "Parent=" before each ID, interfering with the search. 
@@ -472,19 +475,40 @@ sed 's/Parent=//g' ParentIDs.txt > ParentIDs_onlyIDs.txt
 # Add the '#' sign to the list in order to copy the header part of the VCF too
 nano ParentIDs_onlyIDs.txt
 
+
+## Grep with VCF divided by species (from previous steps)
+
 # Grep all elements in the ParentIDs list from the VCF
 grep -f $Proj_PATH/ParentIDs_onlyIDs.txt $Proj_PATH/VCF/lp_GATK_species.vcf > $Proj_PATH/VCF/lp_GATK_ParentIDsGrep.vcf
 
 # Sort SNPs
 sort -k1,2 $Proj_PATH/VCF/lp_GATK_ParentIDsGrep.vcf > tmp && mv tmp $Proj_PATH/VCF/lp_GATK_ParentIDsGrep.vcf
 
+
+## Grep with annotated VCF file including both species
+
+cd $Proj_PATH/VCF
+
+# A copy of the VCF file including both species has been copied in $Proj_PATH/VCF
+
+scp /home/GRUPOS/grupolince/lynx_genomes_5x/VCFs_Dani/annotation/c_ll_lp_plus_h_ll_polarized.lr_ann.vcf $Proj_PATH/VCF
+
+# Grep all elements in the ParentIDs list from the VCF
+
+grep -f $Proj_PATH/ParentIDs_onlyIDs.txt $Proj_PATH/VCF/c_ll_lp_plus_h_ll_polarized.lr_ann.vcf > $Proj_PATH/VCF/c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep.vcf
+
+# Sort SNPs
+sort -k1,2 $Proj_PATH/VCF/c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep.vcf > tmp && mv tmp $Proj_PATH/VCF/c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep.vcf
+
 ```
 
 # 6. Create a table with the useful SNPs information and annotations from VCF file
 
-A table is created with the information regarding the SNPs. Different approaches have been tried. The final version [step 6b] has the advantage of having a fixed number of columns for the SNPEFF annotations (the maximum present in the file, with the ones missing filled with NONE), and a unique column for all of the CUSTOM annotations containing the information regarding the "feature" (region where the SNP falls). SNPs with no CUSTOM annotation will have "EMPTY" in that column.
+A table is created with the information regarding the SNPs. Different approaches have been tried. The final version [step 6a] has the advantage of having a fixed number of columns for the SNPEFF annotations (the maximum present in the file, with the ones missing filled with NONE), and a unique column for all of the CUSTOM annotations containing the information regarding the "feature" (region where the SNP falls). SNPs with no CUSTOM annotation will have "EMPTY" in that column.
 
-## 6 - Create a table with the useful SNPs information and annotations
+A table from the VCF file contaning information for both species (see step 5d) also has been generated [step 6b and 6c]. The change to a larger dataset (VCF contaning unfiltered positions for both L.pardinus and L.lynx), has generated numerous problems not encountered before, especially on the final table. Version 6c (Final) of the script tries to solve most of them by simplifying the final result. It has the advantage of having a single column for SNPEFF annotations, which with a larger dataset are also more numerous. All of the statistics in 6c version have been removed for increased clarity, leaving only the information regarding the Ancestral Allel and the Annotation.
+
+## 6a - Create a table with the useful SNPs information and annotations from per species divided VCF file
 
 ```{r Create a table with the useful SNPs information and annotations, eval=FALSE, engine='bash'}
 
@@ -570,3 +594,179 @@ touch headers.txt
 nano headers.txt
 
 ```
+
+## 6b - Create a table with the useful SNPs information and annotations lp and ll annotated VCF file
+
+```{r Create a table with the useful SNPs information and annotations, eval=FALSE, engine='bash'}
+
+## FINAL VERSION - fixed number of SNPEFF and Custom annotations for each SNP: divide the table in two - one with SNPEFF only and other with custom only, then unite them
+
+# remove header and information about individuals
+grep -v '#' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep.vcf | cut -f1-8 > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals.vcf
+
+# replace blank spaces in annotations with "na"
+sed 's/||/|na|/g' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals.vcf | sed 's/||/|na|/g' > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas.vcf
+
+# remove custom annotations - SNPEFF annotations ONLY are left
+sed 's/|,.*|custom|MODIFIER|na|na|CUSTOM&LYPA23C|.*|na|na|na|na|na|/|/g' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_nocustom.vcf
+
+# add "NONE" to missing ANN columns to render the file squared for NOCUSTOM FILE
+max=$(awk -v FS='|,' 'max < NF { max = NF } END { print max }' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_nocustom.vcf)
+
+echo $max # to know how many columns of SNPEFF annotations there will be
+
+awk -v max=$max -v FS=',' -v OFS=',' '{ for(i=NF+1; i<=max; i++) $i = "NONE"; print }' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_nocustom.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_nocustomsquared.vcf
+
+# isolate custom annotations - CUSTOM annotations ONLY are left
+
+# get all lines with custom annotations and the corresponding line number - CUSTOM ONLY
+grep -n -o ",.|custom|MODIFIER|na|na|CUSTOM&LYPA23C|.*|na|na|na|na|na|" c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_ordered.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly.vcf
+
+# generate a file with the corresponding line number for the custom annotations - CUSTOM ONLY
+cut -d ':' -f1 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly.vcf > aa_customlines
+
+# generate a file with all the numbers from 1 to the maximum line number (total number of lines in the original file)
+TotalNumberOfLines=$(grep "lp" c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_ordered.vcf | wc -l)
+
+seq $TotalNumberOfLines > aa_totlines
+
+# subtract the custom line numbers from the total number of lines to generate a file listing the missing lines (lines with no custom annotation)
+comm aa_customlines aa_totlines | cut -f2 | sed '/^\s*$/d' > aa_nocustomlines
+
+# add a white line in the CUSTOM ONLY annotations file in the missing lines - CAREFUL AS IT OVERWRITES - CHECK IF DONE ALREADY / OTHER POSSIBLE PROBLEMS - if problems are found better re-generate c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly.vcf from scratch
+NoCustomLines=$(cat aa_nocustomlines)
+
+for i in $NoCustomLines
+  do
+  ed -s c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly.vcf < <(printf '%s\n' ${i}i "" . wq)
+done
+
+# remove useless files used for previous steps
+rm aa_*
+
+# remove comma before pasting the two tables together - CUSTOM ONLY
+cut -d ':' -f2 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly.vcf | sed 's/,//' > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly_blanklines.vcf
+
+# condense all information in unique custom column: first count the maximum number of custom annotation columns (max); then cut columns 7, 22, 37, 52, 67 ecc. (always add 15 to the previous starting from 7) a number of times equal to max (to catch all) - CUSTOM ONLY
+
+max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly_blanklines.vcf) && echo $max # count number of columns to include
+
+cut -d '|' -f7,22,37,52 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly_blanklines.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly_blanklines_condensed.vcf # in this case max=4 so columns 7,22(7+15),37(7+30),52(7+45)
+
+# insert EMPTY in empty lines CUSTOM ONLY
+sed -i -e 's/^$/EMPTY/' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly_blanklines_condensed.vcf
+
+# paste together the SNPEFF ONLY and the CUSTOM ONLY files
+paste -d ',' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_nocustomsquared.vcf c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly_blanklines_condensed.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_nocustomsquared_custom.vcf
+
+# remove other separators -> leave TAB as only separator
+tr ';' '\t' <c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_nocustomsquared_custom.vcf | tr ',' '\t' > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_nocustomsquared_custom_tabs.vcf
+
+# remove the "variable"= before of the variable value
+grep 'INFO=' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep.vcf | cut -d '=' -f3 | cut -d ',' -f1 > info.txt
+
+while read pattern
+do
+sed 's/'$pattern'=//' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_nocustomsquared_custom_tabs.vcf > tmp
+mv tmp c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_nocustomsquared_custom_tabs.vcf
+done < info.txt
+
+rm info.txt
+
+# header will need to be added by hand (not all INFO is present in file and adding it all to the headers will mean having mismatching variable-value couples). The ones present in the file are CHROM	POS	ID	REF	ALT	QUAL	FILTER	AA	AC	AF	AN	BaseQRankSum	ClippingRankSum	DP	ExcessHet	FS	InbreedingCoeff	MQ	MQRankSum	QD	ReadPosRankSum	SOR	SNPEFF1	SNPEFF2	CUSTOM (number of SNPEFF columns can be seen by echoing $max while squaring the table)
+touch headers.txt
+nano headers.txt
+
+```
+
+## 6c - AGAIN Create a table with the useful SNPs information and annotations lp and ll annotated VCF file
+
+```{r AGAIN Create a table with the useful SNPs information and annotations, eval=FALSE, engine='bash'}
+
+## Need to divide SNPEFF annotations and custom annotations from the rest of the file since with INDELs included there are compatibility problems between previous script and Database (mainly the commas which are used not only in the ANN= part of the table, but in other parts as well). Squaring SNPEFF annotations was not done, instead they were all included in a single column
+
+# remove header and information about individuals
+grep -v '#' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep.vcf | cut -f1-8 > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals.vcf
+
+# replace blank spaces in annotations with "na"
+sed 's/||/|na|/g' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals.vcf | sed 's/||/|na|/g' > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas.vcf
+
+# separate annotations from rest of VCF
+
+awk -F ';ANN='  '{print $1}' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_noann.vcf
+
+awk -F 'ANN='  '{print $2}' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly.vcf
+
+
+# Remove Custom annotations - SNPEFF annotations ONLY are LEFT
+sed 's/,.*|custom|MODIFIER|na|na|CUSTOM&LYPA23C|.*|na|na|na|na|na|/|/g' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff.vcf
+
+# convert ',' to ';' to have all SNPEFF ANN in one column of the final table
+tr ',' ';' <c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nocomma.vcf
+
+
+# isolate custom annotations - CUSTOM annotations ONLY are LEFT
+
+# get all lines with custom annotations and the corresponding line number - CUSTOM ONLY
+grep -n -o ",.|custom|MODIFIER|na|na|CUSTOM&LYPA23C|.*|na|na|na|na|na|" c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly.vcf
+
+# generate a file with the corresponding line number for the custom annotations - CUSTOM ONLY
+cut -d ':' -f1 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly.vcf > aa_customlines
+
+# generate a file with all the numbers from 1 to the maximum line number (total number of lines in the original file)
+TotalNumberOfLines=$(grep "lp" c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas.vcf | wc -l)
+
+seq $TotalNumberOfLines > aa_totlines
+
+# subtract the custom line numbers from the total number of lines to generate a file listing the missing lines (lines with no custom annotation)
+comm aa_customlines aa_totlines | cut -f2 | sed '/^\s*$/d' > aa_nocustomlines
+
+# add a white line in the CUSTOM ONLY annotations file in the missing lines - CAREFUL AS IT OVERWRITES - CHECK IF DONE ALREADY / OTHER POSSIBLE PROBLEMS - if problems are found better re-generate c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly.vcf from scratch
+NoCustomLines=$(cat aa_nocustomlines)
+
+for i in $NoCustomLines
+  do
+  ed -s c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly.vcf < <(printf '%s\n' ${i}i "" . wq)
+done
+
+# remove useless files used for previous steps
+rm aa_*
+
+# remove comma and line number before pasting the two tables together - CUSTOM ONLY
+cut -d ':' -f2 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly.vcf | sed 's/,//' > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines.vcf
+
+# condense all information in unique custom column: first count the maximum number of custom annotation columns (max); then cut columns 7, 22, 37, 52, 67 ecc. (always add 15 to the previous starting from 7) a number of times equal to max (to catch all) - CUSTOM ONLY
+
+max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines.vcf) && echo $max # count number of columns to include
+
+cut -d '|' -f7,22,37,52,67,82,97,112,127,142,157,172 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines_condensed.vcf # in this case max=12 so columns 7,22(7+15),37(7+30),52(7+45),67,82,97,112,127,142,157,172
+
+# insert EMPTY in empty lines CUSTOM ONLY
+sed -i -e 's/^$/EMPTY/' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines_condensed.vcf
+
+
+
+# paste SNPEFF ONLY (c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nocomma.vcf) and CUSTOM ONLY (c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines_condensed.vcf) tables together
+
+paste -d '\t' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nocomma.vcf c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines_condensed.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annotationspasted.vcf
+
+
+# BEFORE PASTING THE NO ANNOTATIONS FILE NEEDS MODIFICATIONS - keep only AA information
+
+cut -d ';' -f1 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_noann.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_noann_aainfoonly.vcf
+
+
+# paste annotations to table without annotations
+
+paste -d '\t' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_noann_aainfoonly.vcf c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annotationspasted.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_squaredtable.vcf
+
+
+# Final adjustments to table
+
+# Remove "AA=" before the AA
+
+sed 's/AA=//' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_squaredtable.vcf > tmp && mv tmp c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_squaredtable.vcf
+
+
+```
+
