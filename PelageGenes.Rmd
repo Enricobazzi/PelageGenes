@@ -681,9 +681,9 @@ nano headers.txt
 
 ## 6c - AGAIN Create a table with the useful SNPs information and annotations lp and ll annotated VCF file
 
-```{r AGAIN Create a table with the useful SNPs information and annotations, eval=FALSE, engine='bash'}
+```{r Create a table with the useful SNPs - Section 1, eval=FALSE, engine='bash'}
 
-## Need to divide SNPEFF annotations and custom annotations from the rest of the file since with INDELs included there are compatibility problems between previous script and Database (mainly the commas which are used not only in the ANN= part of the table, but in other parts as well). Squaring SNPEFF annotations was not done, instead they were all included in a single column
+## Section 1: Preprocess and divide in NoAnnotations, SNPEFF annotations and CUSTOM annotations
 
 # remove header and information about individuals
 grep -v '#' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep.vcf | cut -f1-8 > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals.vcf
@@ -697,18 +697,89 @@ awk -F ';ANN='  '{print $1}' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_no
 
 awk -F 'ANN='  '{print $2}' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly.vcf
 
-
 # Remove Custom annotations - SNPEFF annotations ONLY are LEFT
-sed 's/,.*|custom|MODIFIER|na|na|CUSTOM&LYPA23C|.*|na|na|na|na|na|/|/g' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff.vcf
+sed 's/,.*|custom|MODIFIER|na|na|CUSTOM&LYPA23C|.*|na|na|na|na|na|//g' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff.vcf
 
-# convert ',' to ';' to have all SNPEFF ANN in one column of the final table
-tr ',' ';' <c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nocomma.vcf
+# Remove Loss of Function (LOF) from SNPEFF only
+sed 's/;LOF.*)//g' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof.vcf
 
+# get all lines with LOF and their line number - LOF ONLY are LEFT
+grep -n -o ";LOF.*)" c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_lofonly.vcf
 
-# isolate custom annotations - CUSTOM annotations ONLY are LEFT
-
-# get all lines with custom annotations and the corresponding line number - CUSTOM ONLY
+# get all lines with custom annotations and the corresponding line number - CUSTOM annotations ONLY are LEFT
 grep -n -o ",.|custom|MODIFIER|na|na|CUSTOM&LYPA23C|.*|na|na|na|na|na|" c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly.vcf
+
+```
+
+## SNPEFF
+
+```{r Create a table with the useful SNPs - Section 2, eval=FALSE, engine='bash'}
+
+## Section 2: Generate a SNPEFF columns file with SNPEFF annotations decomposed for each line
+
+# Make all of SNPEFF annotations have same number of fields (16 normally, 15 if it's the last annotation on the line without warning messages)
+
+sed 's/|,/|na,/g' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof.vcf | sed 's/,/|,/g' > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf
+
+# count maximum number of SNPEFF annotations
+
+max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf ) && echo $max # count number of columns to include -> in this case 16.
+
+# (column 2) get ANNOTATION information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the second)
+cut -d '|' -f2,18,34,50,66,82,98,114,130,146,162,178 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_annotation
+
+# (column 3) get IMPACT information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the third)
+cut -d '|' -f3,19,35,51,67,83,99,115,131,147,163,179 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_impact
+
+# (column 5) get GENE ID information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the fifth)
+cut -d '|' -f5,21,37,53,69,85,101,117,133,149,165,181 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_geneID
+
+# (column 6) get FEATURE TYPE information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the sixth)
+cut -d '|' -f6,22,38,54,70,86,102,118,134,150,166,182 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_featuretype
+
+# (column 7) get FEATURE ID information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the seventh)
+cut -d '|' -f7,23,39,55,71,87,103,119,135,151,167,183 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_featureID
+
+# (column 8) get BIOTYPE information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the eitghth)
+cut -d '|' -f8,24,40,56,72,88,104,120,136,152,168,184 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n'  > Snpeff_biotype
+
+# (column 9) get intron/exon RANK / TOTAL information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the ninth)
+cut -d '|' -f9,25,41,57,73,89,105,121,137,153,169,185 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_rank
+
+# (column 10) get HGVS variant information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the tenth)
+cut -d '|' -f10,26,42,58,74,90,106,122,138,154,170,186 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_hgvsvar
+
+# (column 11) get HGVSprotein variant information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the eleventh)
+cut -d '|' -f11,27,43,59,75,91,107,123,139,155,171,187 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_protvar
+
+# (column 12) get cDNA POS/LENGTH information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the twelth)
+cut -d '|' -f12,28,44,60,76,92,108,124,140,156,172,188 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_cdnapos
+
+# (column 13) get CDS POS/LENGTH information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the thirteenth)
+cut -d '|' -f13,29,45,61,77,93,109,125,141,157,173,189 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_cdspos
+
+# (column 14) get PROTEIN POS/LENGTH information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the fourteenth)
+cut -d '|' -f14,30,46,62,78,94,110,126,142,158,174,190 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_protpos
+
+# (column 15) get DISTANCE TO FEATURE information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the fifteenth)
+cut -d '|' -f15,31,47,63,79,95,111,127,143,159,175,191 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_featdist
+
+# (column 16) get ERRORS information - Having 16 fields of snpeff annotations we get every 16th column starting from the column of interest (in this case the sixteenth)
+cut -d '|' -f16,32,48,64,80,96,112,128,144,160,176,192 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nolof_equalfields.vcf | sed 's/|na|//g' | sed 's/na|//g' | sed 's/|na//g' | sed 's/na//g' | sed -e 's/^$/NA/' | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Snpeff_errors
+
+# paste everything together
+paste Snpeff_annotation Snpeff_impact Snpeff_geneID Snpeff_featuretype Snpeff_featureID Snpeff_biotype Snpeff_rank Snpeff_hgvsvar Snpeff_protvar Snpeff_cdnapos Snpeff_cdspos Snpeff_protpos Snpeff_featdist Snpeff_errors > SNPEFF_COMPLETE
+
+# remove intermediate files
+rm Snpeff_*
+
+```
+
+## CUSTOM
+
+```{r Create a table with the useful SNPs - Section 3, eval=FALSE, engine='bash'}
+
+## Section 3: Condense all of Custom Annotations into one column and add blank lines for positions missing Custom annotations
 
 # generate a file with the corresponding line number for the custom annotations - CUSTOM ONLY
 cut -d ':' -f1 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly.vcf > aa_customlines
@@ -719,14 +790,15 @@ TotalNumberOfLines=$(grep "lp" c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_
 seq $TotalNumberOfLines > aa_totlines
 
 # subtract the custom line numbers from the total number of lines to generate a file listing the missing lines (lines with no custom annotation)
-comm aa_customlines aa_totlines | cut -f2 | sed '/^\s*$/d' > aa_nocustomlines
+comm aa_customlines aa_totlines | cut -f2 | sed '/^\s*$/d' > aa_nocustomlines # NOT WORKING ON SERVER -> copied aa_customlines and aa_totlines to my laptop, executed this command there and then copied aa_nocustomlines back to server - ACTUALLY it probably worked, done it on laptop just to be sure
 
-# add a white line in the CUSTOM ONLY annotations file in the missing lines - CAREFUL AS IT OVERWRITES - CHECK IF DONE ALREADY / OTHER POSSIBLE PROBLEMS - if problems are found better re-generate c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_customonly.vcf from scratch
+
+# add a white line in the CUSTOM ONLY annotations file in the missing lines - CAREFUL AS IT OVERWRITES - CHECK IF DONE ALREADY / OTHER POSSIBLE PROBLEMS - if problems are found better re-generate c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly.vcf from scratch
 NoCustomLines=$(cat aa_nocustomlines)
 
 for i in $NoCustomLines
   do
-  ed -s c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly.vcf < <(printf '%s\n' ${i}i "" . wq)
+  awk -v n=${i} -v s="" 'NR == n {print s} {print}' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly.vcf > tmp && mv tmp c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly.vcf
 done
 
 # remove useless files used for previous steps
@@ -741,14 +813,53 @@ max=$(awk -v FS=',' 'max < NF { max = NF } END { print max }' c_ll_lp_plus_h_ll_
 
 cut -d '|' -f7,22,37,52,67,82,97,112,127,142,157,172 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines_condensed.vcf # in this case max=12 so columns 7,22(7+15),37(7+30),52(7+45),67,82,97,112,127,142,157,172
 
-# insert EMPTY in empty lines CUSTOM ONLY
-sed -i -e 's/^$/EMPTY/' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines_condensed.vcf
+# insert EMPTY in empty lines and remove repetitions CUSTOM ONLY
+sed -e 's/^$/EMPTY/' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines_condensed.vcf | sed 's/|/ /g' | sed ':s;s/\(\<\S*\>\)\(.*\)\<\1\>/\1\2/g;ts;s/  */ /g' | sed 's/ /|/g' | tr '\n' ' ' | sed 's/| / /g' | tr ' ' '\n' > Custom_ONLY
 
+```
+
+## LOF
+
+```{r Create a table with the useful SNPs - Section 4, eval=FALSE, engine='bash'}
+
+## Section 4: Create column for Loss of Function Annotations (LOF)
+
+# generate a file with the corresponding line number for the LOF annotations - LOF ONLY
+cut -d ':' -f1 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_lofonly.vcf > aa_loflines
+
+# generate a file with all the numbers from 1 to the maximum line number (total number of lines in the original file)
+TotalNumberOfLines=$(cat c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas.vcf | wc -l)
+
+seq $TotalNumberOfLines > aa_totlines
+
+# subtract the custom line numbers from the total number of lines to generate a file listing the missing lines (lines without LOF annotations)
+grep -F -x -v -f aa_loflines aa_totlines > aa_noloflines
+
+# add a white line in the LOF ONLY annotations file in the missing lines - CAREFUL AS IT OVERWRITES - CHECK IF DONE ALREADY / OTHER POSSIBLE PROBLEMS - if problems are found better re-generate c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_lofonly.vcf from scratch -> VERY SLOW better run it on a screen
+NoLOFLines=$(cat aa_noloflines)
+echo "" >> c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_lofonly.vcf # add one empty line at the end of the file so that the script will fill all empty spaces
+for i in $NoLOFLines
+  do
+  awk -v n=${i} -v s="" 'NR == n {print s} {print}' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_lofonly.vcf > tmp && mv tmp c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_lofonly.vcf
+done
+
+sed '$d' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_lofonly.vcf > tmp && mv tmp c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_lofonly.vcf # remove the empty line previously added
+
+# remove comma, remove line number, add NA to empty columns before pasting the two tables together - CUSTOM ONLY
+cut -d ':' -f2 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_lofonly.vcf | sed 's/,//' | sed -e 's/^$/NA/' > LOF_annotations
+
+```
+
+## PASTING
+
+```{r Create a table with the useful SNPs - Section 5, eval=FALSE, engine='bash'}
+
+## Section 5: Paste all tables together
 
 
 # paste SNPEFF ONLY (c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nocomma.vcf) and CUSTOM ONLY (c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines_condensed.vcf) tables together
 
-paste -d '\t' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_snpeff_nocomma.vcf c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annonly_customonly_blanklines_condensed.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annotationspasted.vcf
+paste -d '\t' Custom_ONLY SNPEFF_COMPLETE LOF_annotations > ALL_Annotations
 
 
 # BEFORE PASTING THE NO ANNOTATIONS FILE NEEDS MODIFICATIONS - keep only AA information
@@ -756,17 +867,18 @@ paste -d '\t' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas
 cut -d ';' -f1 c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_noann.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_noann_aainfoonly.vcf
 
 
-# paste annotations to table without annotations
+# paste annotations to table without no annotations table
 
-paste -d '\t' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_noann_aainfoonly.vcf c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_annotationspasted.vcf > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_squaredtable.vcf
+paste -d '\t' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_noIndividuals_nas_noann_aainfoonly.vcf ALL_Annotations > c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_squaredtable.vcf
 
 
 # Final adjustments to table
 
 # Remove "AA=" before the AA
 
-sed 's/AA=//' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_squaredtable.vcf > tmp && mv tmp c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_squaredtable.vcf
+sed 's/AA=//' c_ll_lp_plus_h_ll_polarized.lr_ann.ParentIDsGrep_squaredtable.vcf > PelageGenesTable.vcf
 
+# HEADER
+SCAFFOLD	POS	ID	REF	ALT	QUAL	FILTER	AA	CUSTOM	SNPEFF	IMPACT	GENE_ID	FEATURE	FEATURE_ID	BIOTYPE	RANK	VARIANT	P_VARIANT	CDNA_POS	CDS_POS	PROT_POS	DISTANCE	ERRORS  LOF
 
 ```
-
